@@ -35,13 +35,20 @@ Result IStorage::Read(
     R_UNLESS(length >= 0, FileSys::ResultInvalidSize);
     R_UNLESS(offset >= 0, FileSys::ResultInvalidOffset);
 
-    const auto now = std::chrono::steady_clock::now();
-    if (now < next_read_tick) {
-        std::this_thread::sleep_for(next_read_tick - now);
+    static const bool throttle_storage = [] {
+        const char* val = std::getenv("EDEN_NX2_THROTTLE_STORAGE");
+        return val != nullptr && val[0] == '1';
+    }();
+
+    if (throttle_storage) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now < next_read_tick) {
+            std::this_thread::sleep_for(next_read_tick - now);
+        }
+        next_read_tick = std::chrono::steady_clock::now() +
+                         std::chrono::nanoseconds{std::min(length, MaxChargedReadSize) *
+                                                  1'000'000'000 / ReadBytesPerSecond};
     }
-    next_read_tick = std::chrono::steady_clock::now() +
-                     std::chrono::nanoseconds{std::min(length, MaxChargedReadSize) *
-                                              1'000'000'000 / ReadBytesPerSecond};
 
     // Read the data from the Storage backend
     backend->Read(out_bytes.data(), length, offset);

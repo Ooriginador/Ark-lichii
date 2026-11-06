@@ -24,6 +24,9 @@
 #include <mutex>
 #include <utility>
 #include <vector>
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
 
 #include "common/alignment.h"
 #include "common/div_ceil.h"
@@ -2746,14 +2749,11 @@ private:
                 const char* env_value = std::getenv("EDEN_NX2_VDEC_EOS_RELEASE_NOW");
                 return env_value != nullptr && env_value[0] != '0';
             }();
-            const bool drain_eos =
+            const bool drain_eos = release_now ||
                 system.GetApplicationProcessProgramID() == Settings::MarioKartWorldProgramId;
-            if ((drain_eos || release_now) && release_fence && m_stream_ended && m_inputs.Empty() &&
+            if (drain_eos && release_fence && m_stream_ended && m_inputs.Empty() &&
                 m_decoded.empty()) {
-                const u32 reached =
-                    drain_eos ? DrainFreeAsEndOfStream()
-                              : static_cast<u32>(system.Host1x().GetSyncpointManager()
-                                                     .GetGuestSyncpointValue(m_syncpoint));
+                const u32 reached = DrainFreeAsEndOfStream();
                 m_sync_base = reached;
                 m_handed = 0;
                 value = reached;
@@ -2980,8 +2980,7 @@ private:
                 }
                 system.Host1x().GetSyncpointManager().IncrementGuest(m_syncpoint);
                 m_last_output = m_outputs.back();
-                if (frame.end && m_inputs.Empty() && m_decoded.empty() &&
-                    system.GetApplicationProcessProgramID() == Settings::MarioKartWorldProgramId) {
+                if (frame.end && m_inputs.Empty() && m_decoded.empty()) {
                     DrainFreeAsEndOfStream();
                 }
                 ++m_frames_out;
@@ -3070,10 +3069,17 @@ private:
             return;
         }
         auto& syncpoints = system.Host1x().GetSyncpointManager();
+#if defined(__x86_64__) || defined(_M_X64)
+        for (int spin = 0; spin < 250 && !syncpoints.IsReadyGuest(fence.syncpoint, fence.value); ++spin) {
+            for (int i = 0; i < 16; ++i) {
+                _mm_pause();
+            }
+        }
+#endif
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{100};
         while (!syncpoints.IsReadyGuest(fence.syncpoint, fence.value) &&
                std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+            std::this_thread::yield();
         }
         if (Nx2VideoTraceEnabled()) {
             LOG_INFO(Service, "nx2:vdec trace release wait syncpoint={} value={} reached={}",

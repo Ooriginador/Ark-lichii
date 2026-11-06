@@ -35,7 +35,17 @@ EmuWindow_SDL3::EmuWindow_SDL3(InputCommon::InputSubsystem* input_subsystem_, Co
         LOG_CRITICAL(Frontend, "Failed to initialize SDL3: {}, Exiting...", SDL_GetError());
         exit(1);
     }
-    titlebar_timer = SDL_AddTimer(2000, [](void *userdata, SDL_TimerID, Uint32) -> Uint32 {
+    static const Uint32 timer_interval = [] {
+        if (const char* ms_str = std::getenv("EDEN_NX2_PERF_SAMPLE_MS")) {
+            int ms = std::atoi(ms_str);
+            if (ms >= 50 && ms <= 10000) return static_cast<Uint32>(ms);
+        }
+        if (std::getenv("EDEN_NX2_FPS_LOG") != nullptr) {
+            return 500U; // 500ms high-resolution sampling for benchmarks
+        }
+        return 2000U;
+    }();
+    titlebar_timer = SDL_AddTimer(timer_interval, [](void *userdata, SDL_TimerID, Uint32 interval) -> Uint32 {
         auto* this_ = (EmuWindow_SDL3*)userdata;
         auto const results = this_->system.GetAndResetPerfStats();
         auto* const title = new std::string(fmt::format("{} | {}-{} | FPS: {:.0f} ({:.0f}%)", Common::g_build_fullname, Common::g_scm_branch, Common::g_scm_desc, results.average_game_fps, results.emulation_speed * 100.0f));
@@ -47,7 +57,7 @@ EmuWindow_SDL3::EmuWindow_SDL3(InputCommon::InputSubsystem* input_subsystem_, Co
             LOG_INFO(Frontend, "FPS: {:.1f} speed: {:.0f}% frametime: {:.2f} ms", results.average_game_fps,
                      results.emulation_speed * 100.0, results.frametime * 1000.0);
         }
-        return 2000;
+        return interval;
     }, this);
     mouse_timer = SDL_AddTimer(100, [](void *userdata, SDL_TimerID, Uint32) -> Uint32 {
         auto* this_ = (EmuWindow_SDL3*)userdata;
