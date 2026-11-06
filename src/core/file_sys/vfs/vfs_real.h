@@ -94,6 +94,9 @@ public:
     bool IsReadable() const override;
     std::size_t Read(u8* data, std::size_t length, std::size_t offset) const override;
     std::size_t Write(const u8* data, std::size_t length, std::size_t offset) override;
+    const u8* GetDirectPointer(std::size_t offset = 0) const override;
+    std::optional<u8> ReadByte(std::size_t offset) const override;
+    std::vector<u8> ReadBytes(std::size_t size, std::size_t offset) const override;
     bool Rename(std::string_view name) override;
 
 private:
@@ -104,6 +107,10 @@ private:
     std::string path;
     std::optional<u64> size;
     OpenMode perms;
+#if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
+    void* mmap_ptr{nullptr};
+    std::size_t mmap_size{0};
+#endif
 };
 
 // An implementation of VfsDirectory that represents a directory on the user's computer.

@@ -45,6 +45,13 @@ std::size_t VectorVfsFile::Read(u8* data_, std::size_t length, std::size_t offse
     return read;
 }
 
+const u8* VectorVfsFile::GetDirectPointer(std::size_t offset) const {
+    if (offset < data.size()) {
+        return data.data() + offset;
+    }
+    return nullptr;
+}
+
 std::size_t VectorVfsFile::Write(const u8* data_, std::size_t length, std::size_t offset) {
     if (offset + length > data.size())
         data.resize(offset + length);

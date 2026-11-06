@@ -119,6 +119,11 @@ public:
     // into file. Returns number of bytes successfully written.
     virtual std::size_t Write(const u8* data, std::size_t length, std::size_t offset = 0) = 0;
 
+    // Optional zero-copy direct memory view into the underlying buffer/mmap, or nullptr if unavailable.
+    virtual const u8* GetDirectPointer(std::size_t offset = 0) const {
+        return nullptr;
+    }
+
     // Reads exactly one byte at the offset provided, returning std::nullopt on error.
     virtual std::optional<u8> ReadByte(std::size_t offset = 0) const;
     // Reads size bytes starting at offset in file into a vector.

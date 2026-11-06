@@ -223,6 +223,19 @@ public:
         return 0;
     }
 
+    const u8* GetDirectPointer(std::size_t offset = 0) const override {
+        if (offset >= uncompressed_size) {
+            return nullptr;
+        }
+        if (cache_enabled) {
+            std::scoped_lock lock{cache->mutex};
+            if (const auto* cached = cache->Find(cache_index)) {
+                return cached->data() + offset;
+            }
+        }
+        return nullptr;
+    }
+
     bool Rename(std::string_view new_name) override {
         name = std::string(new_name);
         return true;

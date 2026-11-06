@@ -53,6 +53,13 @@ public:
         return read;
     }
 
+    const u8* GetDirectPointer(std::size_t offset = 0) const override {
+        if (offset < size) {
+            return data.data() + offset;
+        }
+        return nullptr;
+    }
+
     std::size_t Write(const u8* data_, std::size_t length, std::size_t offset) override {
         return 0;
     }
@@ -89,6 +96,7 @@ public:
     bool IsReadable() const override;
     std::size_t Read(u8* data, std::size_t length, std::size_t offset) const override;
     std::size_t Write(const u8* data, std::size_t length, std::size_t offset) override;
+    const u8* GetDirectPointer(std::size_t offset = 0) const override;
     bool Rename(std::string_view name) override;
 
     virtual void Assign(std::vector<u8> new_data);

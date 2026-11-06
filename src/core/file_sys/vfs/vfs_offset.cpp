@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <cstring>
 #include <utility>
 
 #include "core/file_sys/vfs/vfs_offset.h"
@@ -47,8 +48,25 @@ bool OffsetVfsFile::IsReadable() const {
     return file->IsReadable();
 }
 
+const u8* OffsetVfsFile::GetDirectPointer(std::size_t r_offset) const {
+    if (r_offset < size) {
+        if (const u8* parent_ptr = file->GetDirectPointer(offset + r_offset)) {
+            return parent_ptr;
+        }
+    }
+    return nullptr;
+}
+
 std::size_t OffsetVfsFile::Read(u8* data, std::size_t length, std::size_t r_offset) const {
-    return file->Read(data, TrimToFit(length, r_offset), offset + r_offset);
+    if (r_offset >= size) {
+        return 0;
+    }
+    const std::size_t to_read = TrimToFit(length, r_offset);
+    if (const u8* ptr = file->GetDirectPointer(offset + r_offset)) {
+        std::memcpy(data, ptr, to_read);
+        return to_read;
+    }
+    return file->Read(data, to_read, offset + r_offset);
 }
 
 std::size_t OffsetVfsFile::Write(const u8* data, std::size_t length, std::size_t r_offset) {
@@ -59,12 +77,21 @@ std::optional<u8> OffsetVfsFile::ReadByte(std::size_t r_offset) const {
     if (r_offset >= size) {
         return std::nullopt;
     }
-
+    if (const u8* ptr = file->GetDirectPointer(offset + r_offset)) {
+        return *ptr;
+    }
     return file->ReadByte(offset + r_offset);
 }
 
 std::vector<u8> OffsetVfsFile::ReadBytes(std::size_t r_size, std::size_t r_offset) const {
-    return file->ReadBytes(TrimToFit(r_size, r_offset), offset + r_offset);
+    if (r_offset >= size) {
+        return {};
+    }
+    const std::size_t to_read = TrimToFit(r_size, r_offset);
+    if (const u8* ptr = file->GetDirectPointer(offset + r_offset)) {
+        return std::vector<u8>(ptr, ptr + to_read);
+    }
+    return file->ReadBytes(to_read, offset + r_offset);
 }
 
 std::vector<u8> OffsetVfsFile::ReadAllBytes() const {

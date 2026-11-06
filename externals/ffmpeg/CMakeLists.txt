@@ -204,6 +204,10 @@ if (YUZU_USE_BUNDLED_FFMPEG)
         PARENT_SCOPE
     )
 
+    if (LINUX)
+        list(APPEND FFmpeg_HWACCEL_LIBRARIES va va-drm va-x11 X11)
+    endif()
+
     set(FFmpeg_LIBRARIES
         FFmpeg::FFmpeg
         ${FFmpeg_HWACCEL_LIBRARIES}

@@ -22,7 +22,10 @@
 #ifdef _WIN32
 #include <cstdio> // _getmaxstdio
 #else
+#include <fcntl.h>
+#include <sys/mman.h>
 #include <sys/resource.h> // getrlimit
+#include <unistd.h>
 #endif
 
 #ifdef _MSC_VER
@@ -315,9 +318,40 @@ void RealVfsFilesystem::RemoveReferenceFromListLocked(FileReference& reference) 
 
 RealVfsFile::RealVfsFile(RealVfsFilesystem& base_, std::unique_ptr<FileReference> reference_,
                          const std::string& path_, OpenMode perms_, std::optional<u64> size_)
-    : base(base_), reference(std::move(reference_)), path(path_), size(size_), perms(perms_) {}
+    : base(base_), reference(std::move(reference_)), path(path_), size(size_), perms(perms_) {
+#if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
+    if (perms == OpenMode::Read) {
+        const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            struct stat st;
+            if (fstat(fd, &st) == 0 && st.st_size > 0) {
+                mmap_size = static_cast<std::size_t>(st.st_size);
+                void* ptr = mmap(nullptr, mmap_size, PROT_READ, MAP_SHARED, fd, 0);
+                if (ptr != MAP_FAILED) {
+                    mmap_ptr = ptr;
+                    madvise(mmap_ptr, mmap_size, MADV_RANDOM);
+#ifdef MADV_HUGEPAGE
+                    madvise(mmap_ptr, mmap_size, MADV_HUGEPAGE);
+#endif
+                } else {
+                    mmap_ptr = nullptr;
+                    mmap_size = 0;
+                }
+            }
+            close(fd);
+        }
+    }
+#endif
+}
 
 RealVfsFile::~RealVfsFile() {
+#if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
+    if (mmap_ptr) {
+        munmap(mmap_ptr, mmap_size);
+        mmap_ptr = nullptr;
+        mmap_size = 0;
+    }
+#endif
     base.DropReference(std::move(reference), path);
 }
 
@@ -338,6 +372,11 @@ std::string RealVfsFile::GetName() const {
 }
 
 std::size_t RealVfsFile::GetSize() const {
+#if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
+    if (mmap_ptr) {
+        return mmap_size;
+    }
+#endif
     if (size) {
         return *size;
     }
@@ -364,11 +403,56 @@ bool RealVfsFile::IsReadable() const {
 }
 
 std::size_t RealVfsFile::Read(u8* data, std::size_t length, std::size_t offset) const {
+#if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
+    if (mmap_ptr) {
+        if (offset >= mmap_size) {
+            return 0;
+        }
+        const std::size_t to_read = std::min(length, mmap_size - offset);
+        std::memcpy(data, static_cast<const u8*>(mmap_ptr) + offset, to_read);
+        return to_read;
+    }
+#endif
     auto lk = base.RefreshReference(path, perms, *reference);
     if (!reference->file || !reference->file->Seek(static_cast<s64>(offset))) {
         return 0;
     }
     return reference->file->ReadSpan(std::span{data, length});
+}
+
+const u8* RealVfsFile::GetDirectPointer(std::size_t offset) const {
+#if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
+    if (mmap_ptr && offset < mmap_size) {
+        return static_cast<const u8*>(mmap_ptr) + offset;
+    }
+#endif
+    return nullptr;
+}
+
+std::optional<u8> RealVfsFile::ReadByte(std::size_t offset) const {
+#if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
+    if (mmap_ptr) {
+        if (offset < mmap_size) {
+            return static_cast<const u8*>(mmap_ptr)[offset];
+        }
+        return std::nullopt;
+    }
+#endif
+    return VfsFile::ReadByte(offset);
+}
+
+std::vector<u8> RealVfsFile::ReadBytes(std::size_t r_size, std::size_t offset) const {
+#if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
+    if (mmap_ptr) {
+        if (offset >= mmap_size) {
+            return {};
+        }
+        const std::size_t actual_size = std::min(r_size, mmap_size - offset);
+        const u8* src = static_cast<const u8*>(mmap_ptr) + offset;
+        return std::vector<u8>(src, src + actual_size);
+    }
+#endif
+    return VfsFile::ReadBytes(r_size, offset);
 }
 
 std::size_t RealVfsFile::Write(const u8* data, std::size_t length, std::size_t offset) {

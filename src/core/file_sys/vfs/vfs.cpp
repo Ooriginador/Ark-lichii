@@ -166,6 +166,9 @@ std::string VfsFile::GetExtension() const {
 VfsDirectory::~VfsDirectory() = default;
 
 std::optional<u8> VfsFile::ReadByte(std::size_t offset) const {
+    if (const u8* ptr = GetDirectPointer(offset)) {
+        return *ptr;
+    }
     u8 out{};
     const std::size_t size = Read(&out, sizeof(u8), offset);
     if (size == 1) {
@@ -176,6 +179,11 @@ std::optional<u8> VfsFile::ReadByte(std::size_t offset) const {
 }
 
 std::vector<u8> VfsFile::ReadBytes(std::size_t size, std::size_t offset) const {
+    if (const u8* ptr = GetDirectPointer(offset)) {
+        const std::size_t available = (offset < GetSize()) ? (GetSize() - offset) : 0;
+        const std::size_t actual_size = std::min(size, available);
+        return std::vector<u8>(ptr, ptr + actual_size);
+    }
     std::vector<u8> out(size);
     std::size_t read_size = Read(out.data(), size, offset);
     out.resize(read_size);
