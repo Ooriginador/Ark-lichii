@@ -11,6 +11,9 @@
 #include <list>
 #include <memory>
 #include <utility>
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
 
 #include "common/assert.h"
 #include "common/settings.h"
@@ -136,6 +139,17 @@ struct GPU::Impl {
     }
 
     void WaitForSyncOperation(const u64 fence) {
+        if (CurrentSyncRequestFence() >= fence) {
+            return;
+        }
+#if defined(__x86_64__) || defined(_M_X64)
+        for (int i = 0; i < 64; ++i) {
+            if (CurrentSyncRequestFence() >= fence) {
+                return;
+            }
+            _mm_pause();
+        }
+#endif
         std::unique_lock lck{sync_request_mutex};
         sync_request_cv.wait(lck, [this, fence] { return CurrentSyncRequestFence() >= fence; });
     }

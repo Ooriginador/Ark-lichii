@@ -6,6 +6,9 @@
 
 #include "common/logging.h"
 #include "video_core/host1x/syncpoint_manager.h"
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
 
 namespace Tegra {
 
@@ -102,6 +105,14 @@ void SyncpointManager::Wait(std::atomic<u32>& syncpoint, std::condition_variable
     if (pred()) {
         return;
     }
+#if defined(__x86_64__) || defined(_M_X64)
+    for (int i = 0; i < 64; ++i) {
+        if (pred()) {
+            return;
+        }
+        _mm_pause();
+    }
+#endif
 
     std::unique_lock lk(guard);
     wait_cv.wait(lk, pred);

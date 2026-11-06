@@ -2743,14 +2743,9 @@ private:
             if (release_fence) {
                 m_release_fences[image] = *release_fence;
             }
-            // Mario Kart World waits for returned images after a movie and acquires a frame for
-            // each completed fence, so its released images need synthetic end-of-stream frames.
-            static const bool release_now = [] {
-                const char* env_value = std::getenv("EDEN_NX2_VDEC_EOS_RELEASE_NOW");
-                return env_value != nullptr && env_value[0] != '0';
-            }();
-            const bool drain_eos = release_now ||
-                system.GetApplicationProcessProgramID() == Settings::MarioKartWorldProgramId;
+            // Mario Kart World and other titles wait for returned images after a movie and acquire a frame for
+            // each completed fence, so released images need synthetic end-of-stream frames.
+            const bool drain_eos = true;
             if (drain_eos && release_fence && m_stream_ended && m_inputs.Empty() &&
                 m_decoded.empty()) {
                 const u32 reached = DrainFreeAsEndOfStream();
