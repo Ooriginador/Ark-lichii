@@ -299,12 +299,16 @@ ComputePass::ComputePass(const Device& device_, Scheduler& scheduler, Descriptor
         .pCode = code.data(),
     });
     device.SaveShader(code);
+    const u32 target_subgroup_size = optional_subgroup_size.value_or(GuestWarpSize);
     const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT subgroup_size_ci{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT,
         .pNext = nullptr,
-        .requiredSubgroupSize = optional_subgroup_size ? *optional_subgroup_size : 32U,
+        .requiredSubgroupSize = target_subgroup_size,
     };
-    bool use_setup_size = device.IsExtSubgroupSizeControlSupported() && optional_subgroup_size;
+    const bool use_setup_size = device.IsExtSubgroupSizeControlSupported() &&
+                                device.IsGuestWarpSizeSupported(VK_SHADER_STAGE_COMPUTE_BIT) &&
+                                (optional_subgroup_size.has_value() ||
+                                 device.GetDriverID() == VK_DRIVER_ID_MESA_RADV);
     pipeline = device.GetLogical().CreateComputePipeline(VkComputePipelineCreateInfo{
         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
         .pNext = nullptr,
@@ -551,7 +555,8 @@ QueriesPrefixScanPass::QueriesPrefixScanPass(
                   device_.IsSubgroupFeatureSupported(VK_SUBGROUP_FEATURE_SHUFFLE_BIT) &&
                   device_.IsSubgroupFeatureSupported(VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT)
               ? std::span<const u32>(QUERIES_PREFIX_SCAN_SUM_COMP_SPV)
-              : std::span<const u32>(QUERIES_PREFIX_SCAN_SUM_NOSUBGROUPS_COMP_SPV)),
+              : std::span<const u32>(QUERIES_PREFIX_SCAN_SUM_NOSUBGROUPS_COMP_SPV),
+          GuestWarpSize),
       scheduler{scheduler_}, compute_pass_descriptor_queue{compute_pass_descriptor_queue_} {}
 
 void QueriesPrefixScanPass::Run(VkBuffer accumulation_buffer, VkBuffer dst_buffer,
@@ -622,7 +627,8 @@ ASTCDecoderPass::ASTCDecoderPass(const Device& device_, Scheduler& scheduler_,
                                  MemoryAllocator& memory_allocator_)
     : ComputePass(device_, scheduler_, descriptor_pool_, ASTC_DESCRIPTOR_SET_BINDINGS,
                   ASTC_PASS_DESCRIPTOR_UPDATE_TEMPLATE_ENTRY, ASTC_BANK_INFO,
-                  COMPUTE_PUSH_CONSTANT_RANGE<sizeof(AstcPushConstants)>, ASTC_DECODER_COMP_SPV),
+                  COMPUTE_PUSH_CONSTANT_RANGE<sizeof(AstcPushConstants)>, ASTC_DECODER_COMP_SPV,
+                  GuestWarpSize),
       scheduler{scheduler_}, staging_buffer_pool{staging_buffer_pool_},
       compute_pass_descriptor_queue{compute_pass_descriptor_queue_}, memory_allocator{
                                                                          memory_allocator_} {}
@@ -839,7 +845,8 @@ BcEncoderPass::BcEncoderPass(const Device& device_, Scheduler& scheduler_,
                              ComputePassDescriptorQueue& compute_pass_descriptor_queue_)
     : ComputePass(device_, scheduler_, descriptor_pool_, BC_ENCODER_DESCRIPTOR_SET_BINDINGS,
                   BC_ENCODER_DESCRIPTOR_UPDATE_TEMPLATE, ASTC_BANK_INFO,
-                  COMPUTE_PUSH_CONSTANT_RANGE<sizeof(BcEncoderPushConstants)>, BC_ENCODER_COMP_SPV),
+                  COMPUTE_PUSH_CONSTANT_RANGE<sizeof(BcEncoderPushConstants)>, BC_ENCODER_COMP_SPV,
+                  GuestWarpSize),
       scheduler{scheduler_}, compute_pass_descriptor_queue{compute_pass_descriptor_queue_} {}
 
 BcEncoderPass::~BcEncoderPass() = default;
@@ -946,7 +953,7 @@ BlockLinearUnswizzle3DPass::BlockLinearUnswizzle3DPass(
             .score = 2,
         },
           COMPUTE_PUSH_CONSTANT_RANGE<sizeof(BlockLinearUnswizzle3DPushConstants)>,
-          BLOCK_LINEAR_UNSWIZZLE_3D_BCN_COMP_SPV),
+          BLOCK_LINEAR_UNSWIZZLE_3D_BCN_COMP_SPV, GuestWarpSize),
       scheduler{scheduler_},
       staging_buffer_pool{staging_buffer_pool_},
       compute_pass_descriptor_queue{compute_pass_descriptor_queue_} {}

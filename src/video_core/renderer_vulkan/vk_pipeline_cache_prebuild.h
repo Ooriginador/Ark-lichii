@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <exception>
 #include <memory>
@@ -21,6 +23,8 @@ class PipelinePrebuild {
         std::unique_ptr<EmissionBudget::Reservation> reservation;
         std::unique_ptr<Pipeline> pipeline;
         bool claimed{};
+        bool completed{};
+        std::condition_variable cv;
     };
 
 public:
@@ -65,12 +69,14 @@ public:
             }
             build = {};
             {
-                std::scoped_lock lock{mutex};
+                std::unique_lock lock{mutex};
+                entry->completed = true;
                 if (!stopped && !entry->claimed && pipeline) {
                     entry->pipeline = std::move(pipeline);
                 } else if (!entry->claimed) {
                     entries.erase(key);
                 }
+                entry->cv.notify_all();
             }
         });
         return true;
@@ -90,24 +96,32 @@ public:
     }
 
     std::unique_ptr<Pipeline> Take(const Key& key) {
-        std::shared_ptr<Entry> entry;
-        {
-            std::scoped_lock lock{mutex};
-            const auto it = entries.find(key);
-            if (it == entries.end()) {
-                return nullptr;
-            }
-            entry = std::move(it->second);
+        std::unique_lock lock{mutex};
+        const auto it = entries.find(key);
+        if (it == entries.end()) {
+            return nullptr;
+        }
+        auto entry = it->second;
+        if (!entry->completed && !stopped) {
+            entry->cv.wait_for(lock, std::chrono::milliseconds{50}, [&] {
+                return stopped || entry->completed;
+            });
+        }
+        if (entry->pipeline) {
             entries.erase(it);
             entry->claimed = true;
+            return std::move(entry->pipeline);
         }
-        return std::move(entry->pipeline);
+        return nullptr;
     }
 
     void Stop() {
         {
-            std::scoped_lock lock{mutex};
+            std::unique_lock lock{mutex};
             stopped = true;
+            for (auto& [k, e] : entries) {
+                e->cv.notify_all();
+            }
         }
         workers.reset();
         tasks.clear();

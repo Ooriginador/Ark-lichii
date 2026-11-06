@@ -67,6 +67,7 @@ VK_DEFINE_HANDLE(VmaPool)
     FEATURE(EXT, ExtendedDynamicState2, EXTENDED_DYNAMIC_STATE_2, extended_dynamic_state2)         \
     FEATURE(EXT, ExtendedDynamicState3, EXTENDED_DYNAMIC_STATE_3, extended_dynamic_state3)         \
     FEATURE(EXT, 4444Formats, 4444_FORMATS, format_a4b4g4r4)                                       \
+    FEATURE(EXT, GraphicsPipelineLibrary, GRAPHICS_PIPELINE_LIBRARY, graphics_pipeline_library)   \
     FEATURE(EXT, IndexTypeUint8, INDEX_TYPE_UINT8, index_type_uint8)                               \
     FEATURE(EXT, LineRasterization, LINE_RASTERIZATION, line_rasterization)                        \
     FEATURE(EXT, MeshShader, MESH_SHADER, mesh_shader)                                             \
@@ -111,6 +112,7 @@ VK_DEFINE_HANDLE(VmaPool)
     EXTENSION(KHR, SWAPCHAIN, swapchain)                                                           \
     EXTENSION(KHR, SWAPCHAIN_MUTABLE_FORMAT, swapchain_mutable_format)                             \
     EXTENSION(KHR, IMAGE_FORMAT_LIST, image_format_list)                                           \
+    EXTENSION(KHR, PIPELINE_LIBRARY, pipeline_library)                                             \
     EXTENSION(KHR, MAINTENANCE_1, maintenance1)                                                    \
     EXTENSION(KHR, MAINTENANCE_2, maintenance2)                                                    \
     EXTENSION(KHR, MAINTENANCE_3, maintenance3)                                                    \
@@ -142,6 +144,8 @@ VK_DEFINE_HANDLE(VmaPool)
     EXTENSION_NAME(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)                                 \
     EXTENSION_NAME(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME)                                     \
     EXTENSION_NAME(VK_EXT_4444_FORMATS_EXTENSION_NAME)                                             \
+    EXTENSION_NAME(VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME)                                \
+    EXTENSION_NAME(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME)                                         \
     EXTENSION_NAME(VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME)                                       \
     EXTENSION_NAME(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME)                                             \
     EXTENSION_NAME(VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME)                               \
@@ -769,6 +773,17 @@ FN_MAX_LIMIT_LIST
         return extensions.subgroup_size_control;
     }
 
+    /// Returns true if the device supports VK_EXT_graphics_pipeline_library.
+    bool IsGraphicsPipelineLibrarySupported() const {
+        return extensions.graphics_pipeline_library;
+    }
+
+    /// Returns true if fast linking is supported for graphics pipeline libraries.
+    bool IsGraphicsPipelineLibraryFastLinkingSupported() const {
+        return extensions.graphics_pipeline_library &&
+               properties.graphics_pipeline_library.graphicsPipelineLibraryFastLinking != VK_FALSE;
+    }
+
     /// Returns true if vkResetQueryPool (host-side query reset) is supported.
     bool IsHostQueryResetSupported() const {
         return features.host_query_reset.hostQueryReset != VK_FALSE;
@@ -1302,6 +1317,7 @@ private:
         VkPhysicalDeviceMaintenance5PropertiesKHR maintenance5{};
         VkPhysicalDeviceDepthStencilResolveProperties depth_stencil_resolve{};
         VkPhysicalDeviceCustomBorderColorPropertiesEXT custom_border_color{};
+        VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT graphics_pipeline_library{};
 
         VkPhysicalDeviceProperties properties{};
     };

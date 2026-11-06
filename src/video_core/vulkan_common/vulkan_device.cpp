@@ -1338,6 +1338,11 @@ bool Device::GetSuitability(bool requires_swapchain) {
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_PROPERTIES_EXT;
         SetNext(next, properties.custom_border_color);
     }
+    if (extensions.graphics_pipeline_library) {
+        properties.graphics_pipeline_library.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_PROPERTIES_EXT;
+        SetNext(next, properties.graphics_pipeline_library);
+    }
 
     // Perform the property fetch.
     physical.GetProperties2(properties2);
@@ -1582,6 +1587,16 @@ void Device::RemoveUnsuitableExtensions() {
     RemoveExtensionFeatureIfUnsuitable(extensions.vertex_input_dynamic_state,
                                        features.vertex_input_dynamic_state,
                                        VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME);
+
+    // VK_EXT_graphics_pipeline_library & VK_KHR_pipeline_library
+    extensions.graphics_pipeline_library =
+        features.graphics_pipeline_library.graphicsPipelineLibrary &&
+        extensions.pipeline_library;
+    RemoveExtensionFeatureIfUnsuitable(extensions.graphics_pipeline_library,
+                                       features.graphics_pipeline_library,
+                                       VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME);
+    RemoveExtensionIfUnsuitable(extensions.pipeline_library,
+                                VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
 
     // VK_KHR_pipeline_executable_properties
     if (Settings::values.renderer_shader_feedback.GetValue()) {
@@ -1980,6 +1995,9 @@ void Device::InitializeGPULogging() {
         }
 
         driver_info += fmt::format("\nTotal Extensions Loaded: {}\n", loaded_extensions.size());
+        driver_info += fmt::format("Graphics Pipeline Library: {}, Fast Linking: {}\n",
+                                   IsGraphicsPipelineLibrarySupported() ? "Supported" : "Unsupported",
+                                   IsGraphicsPipelineLibraryFastLinkingSupported() ? "Enabled" : "Disabled");
 
         GPU::Logging::GPULogger::GetInstance().LogDriverDebugInfo(driver_info);
     }

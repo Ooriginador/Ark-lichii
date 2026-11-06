@@ -45,6 +45,7 @@ public:
     }
 
     void TickFrame();
+    void PruneUnused(bool aggressive = false);
 
 private:
     struct StreamBufferCommit {

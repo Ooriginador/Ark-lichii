@@ -2883,6 +2883,19 @@ void TextureCacheRuntime::TickFrame() {
     });
 }
 
+void TextureCacheRuntime::PruneMemory(bool aggressive) {
+    staging_buffer_pool.PruneUnused(aggressive);
+    if (aggressive) {
+        free_transcodes.clear();
+    }
+    std::erase_if(msaa_scratch_images, [this, aggressive](MsaaScratchImage& scratch) {
+        if (!scheduler.IsFree(scratch.tick)) {
+            return false;
+        }
+        return aggressive || (++scratch.unused_frames > 15);
+    });
+}
+
 Image::Image(TextureCacheRuntime& runtime_, const ImageInfo& info_, GPUVAddr gpu_addr_,
              VAddr cpu_addr_)
     : VideoCommon::ImageBase(info_, gpu_addr_, cpu_addr_), scheduler{&runtime_.scheduler},

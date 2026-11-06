@@ -7,6 +7,9 @@
 #include <chrono>
 #include <cstdlib>
 #include <thread>
+#if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__i386__)
+#include <immintrin.h>
+#endif
 #include "common/scope_exit.h"
 #include "common/settings.h"
 #include "core/core.h"
@@ -18,6 +21,18 @@
 #include "core/hle/kernel/svc.h"
 
 namespace Kernel {
+
+namespace {
+
+inline void Pause() {
+#if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__i386__)
+    _mm_pause();
+#elif defined(__aarch64__)
+    asm volatile("yield");
+#endif
+}
+
+} // Anonymous namespace
 
 PhysicalCore::PhysicalCore(KernelCore& kernel, std::size_t core_index)
     : m_core_index{core_index}
@@ -239,15 +254,32 @@ void PhysicalCore::Idle(KernelCore& kernel) {
         spin_us = 0;
 #else
         const KProcess* process = kernel.ApplicationProcess();
-        spin_us = process != nullptr && process->IsSwitch2() ? 100 : 0;
+        spin_us = (process != nullptr && !m_is_single_core) ? 100 : 0;
 #endif
     }
     const auto spin = std::chrono::microseconds{spin_us};
     if (spin.count() > 0) {
         const auto deadline = std::chrono::steady_clock::now() + spin;
-        while (!m_is_interrupted.load(std::memory_order_acquire) &&
-               std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::yield();
+        constexpr u32 PAUSE_BATCH = 16;
+        u32 yield_counter = 0;
+        while (!m_is_interrupted.load(std::memory_order_acquire)) {
+            for (u32 i = 0; i < PAUSE_BATCH; ++i) {
+                Pause();
+                if (m_is_interrupted.load(std::memory_order_relaxed)) {
+                    break;
+                }
+            }
+            if (m_is_interrupted.load(std::memory_order_acquire)) {
+                break;
+            }
+            // Periodically yield to avoid starving other host threads if CPU is oversubscribed
+            if (++yield_counter >= 16) {
+                yield_counter = 0;
+                std::this_thread::yield();
+            }
+            if (std::chrono::steady_clock::now() >= deadline) {
+                break;
+            }
         }
     }
     std::unique_lock lk{m_guard};

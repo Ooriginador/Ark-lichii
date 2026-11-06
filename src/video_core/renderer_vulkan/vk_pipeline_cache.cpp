@@ -458,7 +458,7 @@ PipelineCache::PipelineCache(Tegra::MaxwellDeviceMemoryManager& device_memory_,
       emission_budget{num_pipeline_workers},
       workers(num_pipeline_workers, "VkPipelineBuilder", {}, Common::ThreadPlacement::Background),
       serialization_thread(1, "VkPipelineSerialization", {}, Common::ThreadPlacement::Background),
-      background_pipelines{64, 16 * 1024 * 1024, device.HasBrokenParallelShaderCompiling()} {
+      background_pipelines{16384, 512 * 1024 * 1024, device.HasBrokenParallelShaderCompiling()} {
     const auto& float_control{device.FloatControlProperties()};
     const VkDriverId driver_id{device.GetDriverID()};
     const VkShaderStageFlags subgroup_stages{device.GetSubgroupSupportedStages()};
@@ -715,13 +715,26 @@ std::unordered_map<u64, u8> LoadUsedPipelines(const std::filesystem::path& path,
 // rest when first needed. A cache that grew over many builds held 48k pipelines, ~21 GB of driver
 // memory built before the game started; the list is only saved at exit or after two minutes, so a
 // boot that ran out of memory never saved one and the next boot did the same.
-constexpr size_t MaxPipelinesWithoutUsedList = 3000;
+// Without a list of the pipelines recent sessions used (the first boot with this cache, or a session
+// that ended before saving it), this many cached graphics pipelines at most are built at boot and the
+// rest when first needed. A cache that grew over many builds held 48k pipelines, ~21 GB of driver
+// memory built before the game started; the list is only saved at exit or after two minutes, so a
+// boot that ran out of memory never saved one and the next boot did the same.
+// When VK_EXT_graphics_pipeline_library fast linking is supported (e.g. RADV ACO), compiling is
+// fast and low-overhead, allowing a much higher boot preload threshold.
+size_t MaxPipelinesWithoutUsedList(const Device& device) {
+    if (device.IsGraphicsPipelineLibraryFastLinkingSupported()) {
+        return 8192;
+    }
+    return 3000;
+}
 
 // EDEN_NX2_PRELOAD_ALL_PIPELINES=1 builds every cached pipeline at boot, as before.
 bool PreloadAllPipelines() {
     static const bool all = [] {
         const char* value = std::getenv("EDEN_NX2_PRELOAD_ALL_PIPELINES");
-        return value != nullptr && value[0] == '1';
+        return value != nullptr && (value[0] == '1' || value[0] == 't' || value[0] == 'T' ||
+                                    value[0] == 'y' || value[0] == 'Y');
     }();
     return all;
 }
@@ -947,7 +960,7 @@ void PipelineCache::LoadDiskResources(u64 title_id, std::stop_token stop_loading
             return;
         }
         if (!PreloadAllPipelines() &&
-            (used_pipelines.empty() ? queued_graphics >= MaxPipelinesWithoutUsedList
+            (used_pipelines.empty() ? queued_graphics >= MaxPipelinesWithoutUsedList(device)
                                     : !used_pipelines.contains(hash))) {
             ++skipped_pipelines;
             size_t capture_bytes = (envs.capacity() - envs.size()) * sizeof(FileEnvironment);
@@ -1029,7 +1042,7 @@ void PipelineCache::LoadDiskResources(u64 title_id, std::stop_token stop_loading
     if (stop_loading.stop_requested()) {
         background_pipelines.Stop();
     } else {
-        background_pipelines.Start(std::clamp<size_t>(num_pipeline_workers / 4, 1, 2));
+        background_pipelines.Start(std::clamp<size_t>(num_pipeline_workers / 2, 2, 6));
     }
 }
 

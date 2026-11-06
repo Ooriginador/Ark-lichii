@@ -140,14 +140,20 @@ void TextureCache<P>::RunGarbageCollector() {
     const auto Configure = [&](bool allow_aggressive) {
         high_priority_mode = total_used_memory >= expected_memory;
         aggressive_mode = allow_aggressive && total_used_memory >= critical_memory;
-        ticks_to_destroy = aggressive_mode ? 10ULL : high_priority_mode ? 25ULL : 50ULL;
+        // Anti-thrashing: proactively engage high priority when approaching within 256 MiB of critical threshold
+        // to prevent Mesa RADV / AMDGPU from spilling allocations across PCIe into GTT.
+        const bool near_critical = total_used_memory + 256_MiB >= critical_memory;
+        if (near_critical) {
+            high_priority_mode = true;
+        }
+        ticks_to_destroy = aggressive_mode ? 10ULL : (high_priority_mode ? (near_critical ? 18ULL : 25ULL) : 50ULL);
         // EDEN_NX2_TC_MIN_AGE=<frames>: never evict images used more recently (thrash tests).
         static const u64 min_age = [] {
             const char* value = std::getenv("EDEN_NX2_TC_MIN_AGE");
             return value != nullptr ? std::strtoull(value, nullptr, 10) : 0ULL;
         }();
         ticks_to_destroy = (std::max)(ticks_to_destroy, min_age);
-        num_iterations = aggressive_mode ? 40 : (high_priority_mode ? 20 : 10);
+        num_iterations = aggressive_mode ? 40 : (high_priority_mode ? (near_critical ? 30 : 20) : 10);
     };
     const auto Cleanup = [this, &num_iterations, &high_priority_mode, &aggressive_mode,
                           &evict_old_costly](ImageId image_id) {
@@ -159,7 +165,13 @@ void TextureCache<P>::RunGarbageCollector() {
         if (True(image.flags & ImageFlagBits::IsDecoding)) {
             return false;
         }
-        const bool must_download = IsDownloadable(image) && False(image.flags & ImageFlagBits::BadOverlap);
+        // An image only requires download if it was modified by the GPU and not CPU-modified.
+        // Unmodified textures (the vast majority) already exist in guest RAM and can be evicted
+        // with zero GPU stalls and zero staging allocations.
+        const bool must_download = True(image.flags & ImageFlagBits::GpuModified) &&
+                                   False(image.flags & ImageFlagBits::CpuModified) &&
+                                   IsDownloadable(image) &&
+                                   False(image.flags & ImageFlagBits::BadOverlap);
         if ((!aggressive_mode && !evict_old_costly && True(image.flags & ImageFlagBits::CostlyLoad)) ||
             (!high_priority_mode && must_download)) {
             return false;
@@ -225,6 +237,14 @@ void TextureCache<P>::RunGarbageCollector() {
                                ? static_cast<double>(it->second) / static_cast<double>(block.block_size)
                                : 0.0;
                 }
+                const auto& candidate_image = slot_images[image_id];
+                // Deprioritize images that require a GPU-stalling synchronous download during GC,
+                // so clean textures are freed smoothly first.
+                if (True(candidate_image.flags & ImageFlagBits::GpuModified) &&
+                    False(candidate_image.flags & ImageFlagBits::CpuModified) &&
+                    IsDownloadable(candidate_image)) {
+                    fill += 10.0;
+                }
                 ordered.emplace_back(fill, image_id);
             }
             std::stable_sort(ordered.begin(), ordered.end(),
@@ -248,10 +268,23 @@ void TextureCache<P>::RunGarbageCollector() {
         lru_cache.ForEachItemBelow(frame_tick - old_age, Cleanup);
         evict_old_costly = false;
     }
+    if (high_priority_mode) {
+        if constexpr (requires { runtime.PruneMemory(bool{}); }) {
+            runtime.PruneMemory(false);
+        }
+    }
     Collect();
     if (total_used_memory >= critical_memory) {
         Configure(true);
+        if constexpr (requires { runtime.PruneMemory(bool{}); }) {
+            runtime.PruneMemory(true);
+        }
         Collect();
+        for (size_t pass = 1; pass < GC_EMERGENCY_COUNTS && total_used_memory >= critical_memory; ++pass) {
+            num_iterations = 40;
+            ticks_to_destroy = (std::max)(u64{5}, ticks_to_destroy / 2);
+            Collect();
+        }
     }
 }
 

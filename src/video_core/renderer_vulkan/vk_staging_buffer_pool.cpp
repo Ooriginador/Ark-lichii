@@ -139,6 +139,46 @@ void StagingBufferPool::TickFrame() {
     ReleaseCache(MemoryUsage::DeviceLocal);
     ReleaseCache(MemoryUsage::Upload);
     ReleaseCache(MemoryUsage::Download);
+
+    // Active anti-thrashing: also prune idle large buffers (>= 1 MiB) and DeviceLocal buffers
+    // so completed staging allocations don't linger for 64 frames in VRAM/GTT.
+    for (size_t log2 = 20; log2 < NUM_LEVELS; ++log2) {
+        if (!device_local_cache[log2].entries.empty()) {
+            ReleaseLevel(device_local_cache, log2);
+        }
+        if (!upload_cache[log2].entries.empty()) {
+            ReleaseLevel(upload_cache, log2);
+        }
+        if (!download_cache[log2].entries.empty()) {
+            ReleaseLevel(download_cache, log2);
+        }
+    }
+}
+
+void StagingBufferPool::PruneUnused(bool aggressive) {
+    const auto prune_cache = [this, aggressive](StagingBuffersCache& cache, bool is_device_local) {
+        for (size_t log2 = 0; log2 < NUM_LEVELS; ++log2) {
+            auto& staging = cache[log2];
+            auto& entries = staging.entries;
+            if (entries.empty()) {
+                continue;
+            }
+            const bool prune_all = aggressive || is_device_local || (log2 >= 20);
+            if (prune_all) {
+                const auto is_free = [this](const StagingBuffer& entry) {
+                    return !entry.deferred && scheduler.IsFree(entry.tick);
+                };
+                entries.erase(std::remove_if(entries.begin(), entries.end(), is_free), entries.end());
+                staging.delete_index = 0;
+                staging.iterate_index = 0;
+            } else {
+                ReleaseLevel(cache, log2);
+            }
+        }
+    };
+    prune_cache(device_local_cache, true);
+    prune_cache(upload_cache, false);
+    prune_cache(download_cache, false);
 }
 
 StagingBufferRef StagingBufferPool::GetStreamBuffer(size_t size) {

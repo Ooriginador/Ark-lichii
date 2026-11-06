@@ -273,7 +273,8 @@ ComputePipeline::ComputePipeline(const Device& device_, Scheduler& scheduler, vk
             .flags = flags,
             .stage{
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                .pNext = device.IsExtSubgroupSizeControlSupported() && uses_warp_ops &&
+                .pNext = device.IsExtSubgroupSizeControlSupported() &&
+                                 (uses_warp_ops || device.GetDriverID() == VK_DRIVER_ID_MESA_RADV) &&
                                  device.IsGuestWarpSizeSupported(VK_SHADER_STAGE_COMPUTE_BIT)
                              ? &subgroup_size_ci
                              : nullptr,

@@ -267,6 +267,11 @@ u64 DynarmicCallbacks64::GetCNTPCT() {
 }
 
 bool DynarmicCallbacks64::CheckMemoryAccess(u64 addr, u64 size, Kernel::DebugWatchpointType type) {
+#ifdef NDEBUG
+    if (!m_debugger_enabled) {
+        return true;
+    }
+#endif
     if (!m_check_memory_access) {
         return true;
     }
@@ -455,6 +460,15 @@ void ArmDynarmic64::MakeJit(Common::PageTable* page_table, std::size_t address_s
     if (!Settings::IsFastmemEnabled()) {
         config.fastmem_pointer = std::nullopt;
         config.fastmem_exclusive_access = false;
+    }
+    // Direct Fastmem: bypass redundant software address bounds checks in release builds
+    // when fastmem is active and debugging/paranoia is not requested. Hardware MMU page faults (SIGSEGV)
+    // and exception_handler_posix handle out-of-bounds/unmapped addresses at native speed with zero soft-check overhead.
+    if (Settings::IsFastmemEnabled() && config.fastmem_pointer &&
+        !m_system.DebuggerEnabled() &&
+        Settings::values.cpu_accuracy.GetValue() != Settings::CpuAccuracy::Debugging &&
+        Settings::values.cpu_accuracy.GetValue() != Settings::CpuAccuracy::Paranoid) {
+        config.fastmem_address_space_bits = 64;
     }
     m_jit.emplace(config);
 }

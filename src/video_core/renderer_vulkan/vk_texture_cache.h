@@ -95,6 +95,9 @@ public:
 
     void TickFrame();
 
+    /// Active VRAM / buffer pruning to prevent driver eviction into PCIe GTT.
+    void PruneMemory(bool aggressive = false);
+
     void FlushDeferredClear();
 
     u64 GetDeviceLocalMemory() const;

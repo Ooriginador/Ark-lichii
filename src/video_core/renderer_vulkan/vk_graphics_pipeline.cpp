@@ -1230,13 +1230,22 @@ void GraphicsPipeline::MakePipeline(VkRenderPass render_pass) {
         if (!spv_modules[stage]) {
             continue;
         }
+        const auto& info = stage_infos[stage];
+        const VkShaderStageFlagBits stage_flag =
+            StageFlag(info, MaxwellToVK::ShaderStage(Shader::StageFromIndex(stage)));
+        const bool uses_warp_ops = info.uses_subgroup_vote || info.uses_subgroup_invocation_id ||
+                                   info.uses_subgroup_shuffles || info.uses_subgroup_mask ||
+                                   info.uses_quad_shuffles || info.uses_fswzadd;
+        const bool require_wave32 =
+            device.IsExtSubgroupSizeControlSupported() &&
+            (uses_warp_ops || device.GetDriverID() == VK_DRIVER_ID_MESA_RADV) &&
+            device.IsGuestWarpSizeSupported(stage_flag);
         [[maybe_unused]] auto& stage_ci =
             shader_stages.emplace_back(VkPipelineShaderStageCreateInfo{
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                .pNext = nullptr,
+                .pNext = require_wave32 ? &subgroup_size_ci : nullptr,
                 .flags = 0,
-                .stage = StageFlag(stage_infos[stage],
-                                   MaxwellToVK::ShaderStage(Shader::StageFromIndex(stage))),
+                .stage = stage_flag,
                 .module = *spv_modules[stage],
                 .pName = "main",
                 .pSpecializationInfo = nullptr,
