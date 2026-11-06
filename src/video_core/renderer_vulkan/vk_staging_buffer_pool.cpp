@@ -318,10 +318,13 @@ void StagingBufferPool::ReleaseCache(MemoryUsage usage) {
 }
 
 void StagingBufferPool::ReleaseLevel(StagingBuffersCache& cache, size_t log2) {
-    constexpr size_t deletions_per_tick = 16;
     auto& staging = cache[log2];
     auto& entries = staging.entries;
     const size_t old_size = entries.size();
+    if (old_size == 0) {
+        return;
+    }
+    const size_t deletions_per_tick = (std::max)(size_t{32}, old_size / 2);
 
     const auto is_deletable = [this](const StagingBuffer& entry) {
         return scheduler.IsFree(entry.tick);

@@ -343,11 +343,12 @@ void TextureCache<P>::TickFrame() {
         // budget as the card fills (16 GB card: 13.5 GB left mid-race), hence the re-read every 30
         // frames. EDEN_NX2_TC_*_MIB overrides still win.
         if constexpr (requires { runtime.GetDeviceMemoryBudget(); }) {
+            const bool follow_budget = native_thresholds_applied || (runtime.GetDeviceLocalMemory() <= 8_GiB + 512_MiB);
             if constexpr (requires { runtime.MemoryPressureEvents(); }) {
                 // Images that did not fit (made in host memory or with nothing bound) mean the
                 // thresholds sit too high for this card and driver: leave more room until the
                 // pressure has been gone for a while.
-                if (native_thresholds_applied) {
+                if (follow_budget) {
                     const u32 events = runtime.MemoryPressureEvents();
                     if (events != seen_pressure_events) {
                         seen_pressure_events = events;
@@ -362,7 +363,7 @@ void TextureCache<P>::TickFrame() {
                     }
                 }
             }
-            if (native_thresholds_applied && budget_check_frames++ % 30 == 0) {
+            if (follow_budget && budget_check_frames++ % 30 == 0) {
                 const u64 budget = runtime.GetDeviceMemoryBudget();
                 if (budget > 2_GiB) {
                     const u64 old_critical = critical_memory;
