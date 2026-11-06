@@ -126,6 +126,13 @@ void LoadOverrides(std::uint64_t program_id, const VideoCore::RendererBase& rend
         case TitleID::NinjaGaidenRagebound:
             Settings::values.use_squashed_iterated_blend = true;
             break;
+        case TitleID::ZeldaOcarinaOfTime:
+            Settings::values.fix_bloom_effects = true;
+            Settings::values.gpu_accuracy = Settings::GpuAccuracy::High;
+            if (Settings::values.scaling_filter.GetValue() == Settings::ScalingFilter::ScaleForce) {
+                Settings::values.scaling_filter = Settings::ScalingFilter::Bilinear;
+            }
+            break;
         default:
             break;
     }

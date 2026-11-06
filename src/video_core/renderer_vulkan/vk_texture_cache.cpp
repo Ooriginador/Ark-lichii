@@ -2435,7 +2435,9 @@ void TextureCacheRuntime::ConvertImage(Framebuffer* dst, ImageView& dst_view, Im
         break;
     }
 
-    if (src_view.format == PixelFormat::D32_FLOAT &&
+    if ((src_view.format == PixelFormat::D32_FLOAT ||
+         VideoCore::Surface::GetFormatType(src_view.format) == SurfaceType::Depth ||
+         VideoCore::Surface::GetFormatType(src_view.format) == SurfaceType::DepthStencil) &&
         VideoCore::Surface::GetFormatType(dst_view.format) == SurfaceType::ColorTexture &&
         (dst_view.format == PixelFormat::B5G6R5_UNORM ||
          Settings::values.fix_bloom_effects.GetValue())) {
