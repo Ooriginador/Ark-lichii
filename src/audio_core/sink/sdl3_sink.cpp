@@ -209,15 +209,15 @@ private:
                 return;
             }
 
-            std::vector<s16> input(bytes_available / static_cast<int>(sizeof(s16)));
-            const int bytes_read = SDL_GetAudioStreamData(stream, input.data(), bytes_available);
+            impl->input_buffer_scratch.resize(static_cast<size_t>(bytes_available) / sizeof(s16));
+            const int bytes_read = SDL_GetAudioStreamData(stream, impl->input_buffer_scratch.data(), bytes_available);
             if (bytes_read <= 0) {
                 return;
             }
 
             const std::size_t num_frames =
                 static_cast<std::size_t>(bytes_read) / sizeof(s16) / frame_size;
-            std::span<const s16> input_buffer{input.data(),
+            std::span<const s16> input_buffer{impl->input_buffer_scratch.data(),
                                               static_cast<std::size_t>(bytes_read) / sizeof(s16)};
             impl->ProcessAudioIn(input_buffer, num_frames);
         } else {
@@ -226,17 +226,19 @@ private:
             }
 
             const int bytes_requested = additional_amount > 0 ? additional_amount : total_amount;
-            std::vector<s16> output(bytes_requested / static_cast<int>(sizeof(s16)));
+            impl->output_buffer_scratch.resize(static_cast<size_t>(bytes_requested) / sizeof(s16));
             const std::size_t num_frames =
                 static_cast<std::size_t>(bytes_requested) / sizeof(s16) / frame_size;
-            std::span<s16> output_buffer{output.data(), output.size()};
+            std::span<s16> output_buffer{impl->output_buffer_scratch.data(), impl->output_buffer_scratch.size()};
             impl->ProcessAudioOutAndRender(output_buffer, num_frames);
-            static_cast<void>(SDL_PutAudioStreamData(stream, output.data(), bytes_requested));
+            static_cast<void>(SDL_PutAudioStreamData(stream, impl->output_buffer_scratch.data(), bytes_requested));
         }
     }
 
     /// SDL stream attached to an opened input/output device
     SDL_AudioStream* stream{};
+    std::vector<s16> output_buffer_scratch{};
+    std::vector<s16> input_buffer_scratch{};
 };
 
 SDLSink::SDLSink(std::string_view target_device_name) {

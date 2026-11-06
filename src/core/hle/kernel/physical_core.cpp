@@ -272,8 +272,9 @@ void PhysicalCore::Idle(KernelCore& kernel) {
             if (m_is_interrupted.load(std::memory_order_acquire)) {
                 break;
             }
-            // Periodically yield to avoid starving other host threads if CPU is oversubscribed
-            if (++yield_counter >= 16) {
+            // Periodically yield only if the host CPU is oversubscribed (<= 4 hardware threads)
+            static const bool should_yield = std::thread::hardware_concurrency() <= 4;
+            if (should_yield && ++yield_counter >= 64) {
                 yield_counter = 0;
                 std::this_thread::yield();
             }
