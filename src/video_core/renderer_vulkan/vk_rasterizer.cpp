@@ -2334,7 +2334,15 @@ bool AccelerateDMA::BufferToImage(const Tegra::DMA::ImageCopy& copy_info,
 void RasterizerVulkan::UpdateDynamicStates() {
     auto& regs = maxwell3d->regs;
     auto& flags = maxwell3d->dirty.flags;
-    const auto topology = maxwell3d->draw_manager.draw_state.topology;
+    const bool has_tess = !mesh_draw && !regs.IsMeshEnabled() &&
+                          (regs.IsShaderConfigEnabled(Maxwell::ShaderType::TessellationInit) ||
+                           regs.IsShaderConfigEnabled(Maxwell::ShaderType::Tessellation));
+    auto topology = maxwell3d->draw_manager.draw_state.topology;
+    if (has_tess) {
+        topology = Maxwell::PrimitiveTopology::Patches;
+    } else if (topology == Maxwell::PrimitiveTopology::Patches) {
+        topology = Maxwell::PrimitiveTopology::Points;
+    }
     const bool topology_changed = state_tracker.ChangePrimitiveTopology(topology);
     if (topology_changed) {
         flags[Dirty::DepthBiasEnable] = true;

@@ -128,7 +128,9 @@ void LoadOverrides(std::uint64_t program_id, const VideoCore::RendererBase& rend
             break;
         case TitleID::ZeldaOcarinaOfTime:
             Settings::values.fix_bloom_effects = true;
-            Settings::values.gpu_accuracy = Settings::GpuAccuracy::High;
+            Settings::values.gpu_accuracy = Settings::GpuAccuracy::Low;
+            Settings::values.use_reactive_flushing = false;
+            Settings::values.gpu_fence_behavior = Settings::GpuFenceBehavior::Default;
             if (Settings::values.scaling_filter.GetValue() == Settings::ScalingFilter::ScaleForce) {
                 Settings::values.scaling_filter = Settings::ScalingFilter::Bilinear;
             }

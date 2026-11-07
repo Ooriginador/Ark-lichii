@@ -5,6 +5,9 @@
 #include <cstring>
 #include <optional>
 #include <set>
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
 
 #include "common/logging.h"
 #include "common/settings.h"
@@ -140,12 +143,25 @@ Nx2VideoDecoder::Nx2VideoDecoder(std::string_view mime) : impl{std::make_unique<
         return;
     }
     impl->context.emplace(*impl->decoder);
+    bool hw_ready = false;
     if (Settings::values.nvdec_emulation.GetValue() == Settings::NvdecEmulation::Gpu) {
         impl->hardware.emplace();
-        impl->hardware->InitializeForDecoder(*impl->context, *impl->decoder);
+        hw_ready = impl->hardware->InitializeForDecoder(*impl->context, *impl->decoder);
     }
     impl->open = impl->context->OpenContext(*impl->decoder);
-    LOG_INFO(HW_GPU, "nx2 video: decoder for \"{}\" {}", mime, impl->open ? "open" : "failed to open");
+    if ((!impl->open || (!hw_ready && std::string_view{impl->decoder->GetCodec()->name} == "av1")) &&
+        *codec == NvdecCommon::VideoCodec::AV1) {
+        impl->context.reset();
+        impl->hardware.reset();
+        impl->decoder.emplace(*codec, true);
+        if (impl->decoder->GetCodec() != nullptr) {
+            impl->context.emplace(*impl->decoder);
+            impl->open = impl->context->OpenContext(*impl->decoder);
+        }
+    }
+    LOG_INFO(HW_GPU, "nx2 video: decoder for \"{}\" ({}) {}", mime,
+             impl->decoder->GetCodec() ? impl->decoder->GetCodec()->name : "none",
+             impl->open ? "open" : "failed to open");
 }
 
 Nx2VideoDecoder::~Nx2VideoDecoder() = default;
@@ -236,7 +252,20 @@ void Nx2VideoDecoder::Render(const Nx2Picture& picture, Nx2PictureFormat format,
             const u8* u = f->data[1] + y * f->linesize[1];
             const u8* v = f->data[2] + y * f->linesize[2];
             u8* dst = out.data() + chroma_offset + y * pitch;
-            for (u32 x = 0; x < chroma_width; ++x) {
+            u32 x = 0;
+#if defined(__AVX2__)
+            for (; x + 32 <= chroma_width; x += 32) {
+                const __m256i u_vec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(u + x));
+                const __m256i v_vec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(v + x));
+                const __m256i lo = _mm256_unpacklo_epi8(u_vec, v_vec);
+                const __m256i hi = _mm256_unpackhi_epi8(u_vec, v_vec);
+                const __m256i out0 = _mm256_permute2x128_si256(lo, hi, 0x20);
+                const __m256i out1 = _mm256_permute2x128_si256(lo, hi, 0x31);
+                _mm256_storeu_si256(reinterpret_cast<__m256i*>(dst + x * 2), out0);
+                _mm256_storeu_si256(reinterpret_cast<__m256i*>(dst + x * 2 + 32), out1);
+            }
+#endif
+            for (; x < chroma_width; ++x) {
                 dst[x * 2] = u[x];
                 dst[x * 2 + 1] = v[x];
             }

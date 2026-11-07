@@ -105,7 +105,15 @@ void RefreshXfbState(VideoCommon::TransformFeedbackState& state, const Maxwell& 
 
 void FixedPipelineState::Refresh(Tegra::Engines::Maxwell3D& maxwell3d, DynamicFeatures& features) {
     const Maxwell& regs = maxwell3d.regs;
-    const auto topology_ = maxwell3d.draw_manager.draw_state.topology;
+    const bool has_tess = !regs.IsMeshEnabled() &&
+                          (regs.IsShaderConfigEnabled(Maxwell::ShaderType::TessellationInit) ||
+                           regs.IsShaderConfigEnabled(Maxwell::ShaderType::Tessellation));
+    auto topology_ = maxwell3d.draw_manager.draw_state.topology;
+    if (has_tess) {
+        topology_ = Maxwell::PrimitiveTopology::Patches;
+    } else if (topology_ == Maxwell::PrimitiveTopology::Patches) {
+        topology_ = Maxwell::PrimitiveTopology::Points;
+    }
 
     driver_id = features.driver_id;
     driver_version = features.driver_version;

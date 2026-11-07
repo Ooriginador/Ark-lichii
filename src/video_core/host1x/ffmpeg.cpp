@@ -46,8 +46,9 @@ constexpr std::array PreferredGpuDecoders = {
 #elif defined(__ANDROID__)
     AV_HWDEVICE_TYPE_MEDIACODEC,
 #elif defined(__unix__)
-    AV_HWDEVICE_TYPE_CUDA,
     AV_HWDEVICE_TYPE_VAAPI,
+    AV_HWDEVICE_TYPE_CUDA,
+    AV_HWDEVICE_TYPE_DRM,
     AV_HWDEVICE_TYPE_VDPAU,
 #endif
     AV_HWDEVICE_TYPE_VULKAN,
@@ -154,7 +155,7 @@ Frame::~Frame() {
     av_frame_free(&m_frame);
 }
 
-Decoder::Decoder(Tegra::Host1x::NvdecCommon::VideoCodec codec) {
+Decoder::Decoder(Tegra::Host1x::NvdecCommon::VideoCodec codec, bool force_software) {
     const AVCodecID av_codec = [&] {
         switch (codec) {
         case Tegra::Host1x::NvdecCommon::VideoCodec::H264:
@@ -172,7 +173,8 @@ Decoder::Decoder(Tegra::Host1x::NvdecCommon::VideoCodec codec) {
     }();
 
 #if defined(__ANDROID__)
-    if (Settings::values.nvdec_emulation.GetValue() == Settings::NvdecEmulation::Gpu) {
+    if (!force_software &&
+        Settings::values.nvdec_emulation.GetValue() == Settings::NvdecEmulation::Gpu) {
         const char* mc_name = nullptr;
         switch (av_codec) {
         case AV_CODEC_ID_H264: mc_name = "h264_mediacodec"; break;
@@ -183,6 +185,15 @@ Decoder::Decoder(Tegra::Host1x::NvdecCommon::VideoCodec codec) {
         }
         if (mc_name) {
             m_codec = avcodec_find_decoder_by_name(mc_name);
+        }
+    }
+#else
+    if (!force_software &&
+        Settings::values.nvdec_emulation.GetValue() == Settings::NvdecEmulation::Gpu &&
+        av_codec == AV_CODEC_ID_AV1) {
+        if (const AVCodec* hw_av1 = avcodec_find_decoder_by_name("av1");
+            hw_av1 != nullptr && avcodec_get_hw_config(hw_av1, 0) != nullptr) {
+            m_codec = hw_av1;
         }
     }
 #endif
@@ -253,7 +264,27 @@ bool HardwareContext::InitializeForDecoder(DecoderContext& decoder_context, cons
 bool HardwareContext::InitializeWithType(AVHWDeviceType type) {
     av_buffer_unref(&m_gpu_decoder);
 
-    if (const int ret = av_hwdevice_ctx_create(&m_gpu_decoder, type, nullptr, nullptr, 0); ret < 0) {
+    int ret = -1;
+#if defined(__unix__) && !defined(__APPLE__) && !defined(__ANDROID__)
+    if ((type == AV_HWDEVICE_TYPE_VAAPI || type == AV_HWDEVICE_TYPE_DRM) &&
+        std::getenv("DRI_PRIME") != nullptr) {
+        ret = av_hwdevice_ctx_create(&m_gpu_decoder, type, "/dev/dri/renderD128", nullptr, 0);
+    }
+#endif
+    if (ret < 0) {
+        ret = av_hwdevice_ctx_create(&m_gpu_decoder, type, nullptr, nullptr, 0);
+    }
+#if defined(__unix__) && !defined(__APPLE__) && !defined(__ANDROID__)
+    if (ret < 0 && (type == AV_HWDEVICE_TYPE_VAAPI || type == AV_HWDEVICE_TYPE_DRM)) {
+        for (const char* drm_node : {"/dev/dri/renderD128", "/dev/dri/renderD129"}) {
+            ret = av_hwdevice_ctx_create(&m_gpu_decoder, type, drm_node, nullptr, 0);
+            if (ret >= 0) {
+                break;
+            }
+        }
+    }
+#endif
+    if (ret < 0) {
         LOG_DEBUG(HW_GPU, "av_hwdevice_ctx_create({}) failed: {}", av_hwdevice_get_type_name(type), AVError(ret));
         return false;
     }
@@ -282,7 +313,13 @@ bool HardwareContext::InitializeWithType(AVHWDeviceType type) {
 DecoderContext::DecoderContext(const Decoder& decoder) : m_decoder{decoder} {
     m_codec_context = avcodec_alloc_context3(m_decoder.GetCodec());
     av_opt_set(m_codec_context->priv_data, "tune", "zerolatency", 0);
-    m_codec_context->thread_count = 0;
+    if (m_decoder.GetCodec() && std::string_view{m_decoder.GetCodec()->name} == "libdav1d") {
+        av_opt_set_int(m_codec_context->priv_data, "tilethreads", 4, 0);
+        av_opt_set_int(m_codec_context->priv_data, "max_frame_delay", 1, 0);
+        m_codec_context->thread_count = 4;
+    } else {
+        m_codec_context->thread_count = 0;
+    }
     m_codec_context->thread_type &= ~FF_THREAD_FRAME;
     m_codec_context->flags |= AV_CODEC_FLAG_LOW_DELAY;
     m_codec_context->flags2 |= AV_CODEC_FLAG2_FAST;
