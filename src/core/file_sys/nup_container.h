@@ -34,7 +34,7 @@ struct NupSpillFile {
 
 /// LRU over decompressed zstd extents, shared by the files of one container.
 struct NupDecompressCache {
-    static constexpr std::size_t DefaultCap = 512 * 1024 * 1024;
+    static constexpr std::size_t DefaultCap = 2048ULL * 1024 * 1024;
 
     using Entry = std::pair<std::size_t, std::vector<u8>>;
 

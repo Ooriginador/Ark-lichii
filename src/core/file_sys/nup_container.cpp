@@ -375,6 +375,15 @@ bool NupContainer::IsNupFile(const VirtualFile& file) {
 NupContainer::NupContainer(VirtualFile file_, std::size_t memory_cache_cap,
                            std::filesystem::path spill_dir_)
     : file(std::move(file_)), cache(std::make_shared<NupDecompressCache>()) {
+    if (const char* env = std::getenv("EDEN_NX2_NUP_CACHE_MB")) {
+        try {
+            const auto mb = std::stoull(env);
+            if (mb > 0) {
+                memory_cache_cap = static_cast<std::size_t>(mb) * 1024 * 1024;
+            }
+        } catch (...) {
+        }
+    }
     cache->cap = memory_cache_cap;
     cache->spill_dir = spill_dir_.empty()
                            ? Common::FS::GetEdenPath(Common::FS::EdenPath::CacheDir) / "nup"
