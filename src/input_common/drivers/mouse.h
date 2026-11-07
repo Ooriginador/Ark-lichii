@@ -115,7 +115,9 @@ private:
     Common::Vec<float, 3> last_motion_change;
     Common::Vec<int, 2> wheel_position;
     Common::SteadyClock::time_point last_notify_timestamp{};
+    Common::SteadyClock::time_point last_move_timestamp{};
     bool button_pressed = false;
+    bool has_active_mouse_move = false;
 };
 
 } // namespace InputCommon

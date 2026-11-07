@@ -14,7 +14,7 @@
 #include "input_common/drivers/mouse.h"
 
 namespace InputCommon {
-constexpr float default_panning_sensitivity = 0.0010f;
+constexpr float default_panning_sensitivity = 0.0035f;
 constexpr float default_stick_sensitivity = 0.0006f;
 constexpr float default_deadzone_counterweight = 0.01f;
 constexpr float default_motion_panning_sensitivity = 2.5f;
@@ -75,24 +75,42 @@ Mouse::Mouse(std::string input_engine_) : InputEngine(std::move(input_engine_)) 
 
 void Mouse::UpdateStickInput(Common::SteadyClock::time_point timestamp) {
     if (IsMousePanningEnabled()) {
-        const float length = last_mouse_change.Length();
+        const float raw_length = last_mouse_change.Length();
 
-        // Prevent input from exceeding the max range (1.0f) too much,
-        // but allow some room to make it easier to sustain
-        if (length > maximum_stick_range) {
-            last_mouse_change /= length;
-            last_mouse_change *= maximum_stick_range;
+        if (raw_length <= 0.0001f) {
+            SetAxis(identifier, mouse_axis_x, 0.0f);
+            SetAxis(identifier, mouse_axis_y, 0.0f);
+            return;
         }
 
-        SetAxis(identifier, mouse_axis_x, last_mouse_change[0]);
-        SetAxis(identifier, mouse_axis_y, -last_mouse_change[1]);
+        // If mouse stopped moving for more than 15 ms, snap stick to 0 immediately
+        // This eliminates the floaty "sliding on ice" inertia artifact.
+        const auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(timestamp - last_move_timestamp).count();
+        if (elapsed_us > 15000) {
+            last_mouse_change = {};
+            has_active_mouse_move = false;
+            SetAxis(identifier, mouse_axis_x, 0.0f);
+            SetAxis(identifier, mouse_axis_y, 0.0f);
+            return;
+        }
 
-        // Decay input over time
-        const float clamped_length = (std::min)(1.0f, length);
+        // Clamp to max stick range (1.0f)
+        const float clamped_length = (std::min)(1.0f, raw_length);
+        const auto direction = last_mouse_change / raw_length;
+
+        // Deadzone counterweight: remap range [0, 1] into [deadzone_cw, 1.0]
+        // Ensures the game engine immediately responds to subtle 1-pixel micro movements
+        const float deadzone_cw = (std::min)(0.90f, Settings::values.mouse_panning_deadzone_counterweight.GetValue() * default_deadzone_counterweight);
+        const float remapped_length = deadzone_cw + clamped_length * (1.0f - deadzone_cw);
+
+        SetAxis(identifier, mouse_axis_x, direction[0] * remapped_length);
+        SetAxis(identifier, mouse_axis_y, -direction[1] * remapped_length);
+
+        // Progressive decay during active motion
         const float decay_strength = Settings::values.mouse_panning_decay_strength.GetValue();
-        const float decay = 1 - clamped_length * clamped_length * decay_strength * 0.01f;
+        const float decay = 1.0f - clamped_length * decay_strength * 0.01f;
         const float min_decay = Settings::values.mouse_panning_min_decay.GetValue();
-        const float clamped_decay = (std::min)(1 - min_decay / 100.0f, decay);
+        const float clamped_decay = (std::min)(1.0f - min_decay / 100.0f, decay);
         last_mouse_change *= clamped_decay;
     }
 }
@@ -105,17 +123,11 @@ void Mouse::UpdateMotionInput(Common::SteadyClock::time_point timestamp) {
                                               last_motion_change[1] * last_motion_change[1]);
 
     // Clamp rotation speed
-    if (rotation_velocity > maximum_rotation_speed / sensitivity) {
+    if (rotation_velocity > maximum_rotation_speed / sensitivity && rotation_velocity > 0.0001f) {
         const float multiplier = maximum_rotation_speed / rotation_velocity / sensitivity;
         last_motion_change[0] = last_motion_change[0] * multiplier;
         last_motion_change[1] = last_motion_change[1] * multiplier;
     }
-
-    if (IsMousePanningEnabled()) {
-        last_motion_change[0] = 0;
-        last_motion_change[1] = 0;
-    }
-    last_motion_change[2] = 0;
 
     SetMotion(motion_identifier, 0, BasicMotion{
         .gyro_x = last_motion_change[0] * sensitivity,
@@ -126,24 +138,35 @@ void Mouse::UpdateMotionInput(Common::SteadyClock::time_point timestamp) {
         .accel_z = 0,
         .delta_timestamp = u64(std::chrono::duration_cast<std::chrono::microseconds>(timestamp - last_notify_timestamp).count()),
     });
+
+    last_motion_change = {};
 }
 
 void Mouse::Move(int x, int y, int center_x, int center_y) {
     if (IsMousePanningEnabled()) {
         auto const mouse_change_int = Common::Vec<int, 2>(x, y) - Common::Vec<int, 2>(center_x, center_y);
         auto const mouse_change = Common::Vec<float, 2>(float(mouse_change_int[0]), float(mouse_change_int[1]));
-        auto const x_sensitivity = Settings::values.mouse_panning_x_sensitivity.GetValue() * default_panning_sensitivity;
-        auto const y_sensitivity = Settings::values.mouse_panning_y_sensitivity.GetValue() * default_panning_sensitivity;
-        auto const deadzone_cw = Settings::values.mouse_panning_deadzone_counterweight.GetValue() * default_deadzone_counterweight;
-        last_motion_change += {-mouse_change[1] * x_sensitivity, -mouse_change[0] * y_sensitivity, 0};
-        last_mouse_change[0] += mouse_change[0] * x_sensitivity;
-        last_mouse_change[1] += mouse_change[1] * y_sensitivity;
-        // Bind the mouse change to [0 <= deadzone_cw <= 1.0]
-        const float length = last_mouse_change.Length();
-        if (length < deadzone_cw && length != 0.0f) {
-            last_mouse_change /= length;
-            last_mouse_change *= deadzone_cw;
+        const float delta_len = mouse_change.Length();
+        if (delta_len <= 0.0001f) {
+            return;
         }
+
+        // Velocity ballistics: dynamic acceleration factor for swift turns
+        // Subtle micro-movements stay 1:1, fast sweeps ramp up smoothly
+        const float accel = 1.0f + (std::min)(delta_len * 0.025f, 2.5f);
+
+        auto const x_sensitivity = Settings::values.mouse_panning_x_sensitivity.GetValue() * default_panning_sensitivity * accel;
+        auto const y_sensitivity = Settings::values.mouse_panning_y_sensitivity.GetValue() * default_panning_sensitivity * accel;
+
+        // Direct velocity mapping
+        last_mouse_change[0] = mouse_change[0] * x_sensitivity;
+        last_mouse_change[1] = mouse_change[1] * y_sensitivity;
+
+        // Feed mouse delta to motion/gyro for 1:1 Zelda Bow/Scope aiming
+        last_motion_change += {-mouse_change[1] * x_sensitivity * 12.0f, -mouse_change[0] * y_sensitivity * 12.0f, 0};
+
+        has_active_mouse_move = true;
+        last_move_timestamp = Common::SteadyClock::Now();
     } else {
         if (button_pressed) {
             const auto mouse_move = Common::Vec<int, 2>(x, y) - mouse_origin;
