@@ -127,9 +127,10 @@ void LoadOverrides(std::uint64_t program_id, const VideoCore::RendererBase& rend
             Settings::values.use_squashed_iterated_blend = true;
             break;
         case TitleID::ZeldaOcarinaOfTime:
-            Settings::values.fix_bloom_effects = true;
-            Settings::values.gpu_accuracy = Settings::GpuAccuracy::Low;
-            Settings::values.use_reactive_flushing = false;
+            Settings::values.fix_bloom_effects = false;
+            Settings::values.gpu_accuracy = Settings::GpuAccuracy::High;
+            Settings::values.use_reactive_flushing = true;
+            Settings::values.astc_recompression = Settings::AstcRecompression::Uncompressed;
             Settings::values.gpu_fence_behavior = Settings::GpuFenceBehavior::Default;
             if (Settings::values.scaling_filter.GetValue() == Settings::ScalingFilter::ScaleForce) {
                 Settings::values.scaling_filter = Settings::ScalingFilter::Bilinear;

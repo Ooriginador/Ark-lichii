@@ -326,9 +326,6 @@ void DefineSsbos(EmitContext& ctx, StorageTypeDefinition& type_def,
         const Id id{ctx.AddGlobalVariable(struct_pointer, spv::StorageClass::StorageBuffer)};
         ctx.Decorate(id, spv::Decoration::Binding, binding);
         ctx.Decorate(id, spv::Decoration::DescriptorSet, 0U);
-        if (!desc.is_written && !info.uses_global_memory) {
-            ctx.Decorate(id, spv::Decoration::NonWritable);
-        }
         ctx.Name(id, fmt::format("ssbo{}", index));
         if (ctx.profile.supported_spirv >= 0x00010400) {
             ctx.interfaces.push_back(id);
@@ -1557,9 +1554,6 @@ void EmitContext::DefineImageBuffers(const Info& info, u32& binding) {
         Decorate(id, spv::Decoration::Binding, binding);
         Decorate(id, spv::Decoration::DescriptorSet, 0U);
         Name(id, NameOf(stage, desc, "imgbuf"));
-        if (!desc.is_written) {
-            Decorate(id, spv::Decoration::NonWritable);
-        }
         if (info.requires_coherent_image_memory) {
             Decorate(id, spv::Decoration::Coherent);
         }
@@ -1618,9 +1612,6 @@ void EmitContext::DefineImages(const Info& info, u32& binding, u32& scaling_inde
         Decorate(id, spv::Decoration::Binding, binding);
         Decorate(id, spv::Decoration::DescriptorSet, 0U);
         Name(id, NameOf(stage, desc, "img"));
-        if (!desc.is_written) {
-            Decorate(id, spv::Decoration::NonWritable);
-        }
         if (info.requires_coherent_image_memory) {
             Decorate(id, spv::Decoration::Coherent);
         }
