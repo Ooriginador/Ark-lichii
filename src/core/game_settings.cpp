@@ -132,6 +132,9 @@ void LoadOverrides(std::uint64_t program_id, const VideoCore::RendererBase& rend
             Settings::values.use_reactive_flushing = true;
             Settings::values.astc_recompression = Settings::AstcRecompression::Uncompressed;
             Settings::values.gpu_fence_behavior = Settings::GpuFenceBehavior::Default;
+            Settings::values.barrier_feedback_loops = true;
+            Settings::values.enable_buffer_history = false;
+            Settings::values.async_presentation = false;
             if (Settings::values.scaling_filter.GetValue() == Settings::ScalingFilter::ScaleForce) {
                 Settings::values.scaling_filter = Settings::ScalingFilter::Bilinear;
             }
