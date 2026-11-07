@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <cstring>
+#include <filesystem>
 #include <string_view>
 #include <vector>
 
@@ -266,9 +267,10 @@ bool HardwareContext::InitializeWithType(AVHWDeviceType type) {
 
     int ret = -1;
 #if defined(__unix__) && !defined(__APPLE__) && !defined(__ANDROID__)
-    if ((type == AV_HWDEVICE_TYPE_VAAPI || type == AV_HWDEVICE_TYPE_DRM) &&
-        std::getenv("DRI_PRIME") != nullptr) {
-        ret = av_hwdevice_ctx_create(&m_gpu_decoder, type, "/dev/dri/renderD128", nullptr, 0);
+    if (const char* custom_dev = std::getenv("VAAPI_DEVICE")) {
+        ret = av_hwdevice_ctx_create(&m_gpu_decoder, type, custom_dev, nullptr, 0);
+    } else if (const char* dri_dev = std::getenv("DRI_DEVICE")) {
+        ret = av_hwdevice_ctx_create(&m_gpu_decoder, type, dri_dev, nullptr, 0);
     }
 #endif
     if (ret < 0) {
@@ -276,10 +278,13 @@ bool HardwareContext::InitializeWithType(AVHWDeviceType type) {
     }
 #if defined(__unix__) && !defined(__APPLE__) && !defined(__ANDROID__)
     if (ret < 0 && (type == AV_HWDEVICE_TYPE_VAAPI || type == AV_HWDEVICE_TYPE_DRM)) {
-        for (const char* drm_node : {"/dev/dri/renderD128", "/dev/dri/renderD129"}) {
-            ret = av_hwdevice_ctx_create(&m_gpu_decoder, type, drm_node, nullptr, 0);
-            if (ret >= 0) {
-                break;
+        for (int node = 128; node <= 136; ++node) {
+            const std::string drm_node = fmt::format("/dev/dri/renderD{}", node);
+            if (std::filesystem::exists(drm_node)) {
+                ret = av_hwdevice_ctx_create(&m_gpu_decoder, type, drm_node.c_str(), nullptr, 0);
+                if (ret >= 0) {
+                    break;
+                }
             }
         }
     }

@@ -65,5 +65,9 @@ artifacts
 vulkansdk*.exe
 *.tar.zst
 
+# Graphify knowledge graph outputs
+graphify-out/
+*/graphify-out/
+
 # Build-time generated external sources
 externals/generated
