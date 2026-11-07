@@ -67,6 +67,7 @@ struct Profile {
     bool support_storage_texel_buffer_array_nonuniform_indexing{};
 
     bool warp_size_potentially_larger_than_guest{};
+    bool fast_software_hmma{};
 
     bool lower_left_origin_mode{};
     /// Fragment outputs have to be declared even if they are not written to avoid undefined values.

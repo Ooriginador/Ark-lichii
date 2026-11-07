@@ -337,13 +337,29 @@ void AddRuntimeSpirvTime(size_t thread, std::chrono::steady_clock::time_point be
         std::memory_order::relaxed);
 }
 
+Shader::Profile StageProfile(const Device& device, Shader::Profile stage_profile,
+                             const Shader::IR::Program& program) {
+    const VkShaderStageFlagBits stage_flag =
+        program.info.is_task
+            ? VK_SHADER_STAGE_TASK_BIT_EXT
+            : (program.info.is_mesh ? VK_SHADER_STAGE_MESH_BIT_EXT
+                                    : MaxwellToVK::ShaderStage(program.stage));
+    if (device.IsExtSubgroupSizeControlSupported() &&
+        device.IsGuestWarpSizeSupported(stage_flag)) {
+        stage_profile.warp_size_potentially_larger_than_guest = false;
+        stage_profile.max_subgroup_size = GuestWarpSize;
+    }
+    return stage_profile;
+}
+
 vk::ShaderModule EmitShaderModule(const Device& device, const Shader::Profile& profile,
                                  const Shader::RuntimeInfo& runtime_info,
                                  Shader::IR::Program& program, Shader::Backend::Bindings& binding,
                                  u64 shader_hash, size_t stage_index,
                                  std::span<const u32> reference = {}) {
+    const Shader::Profile stage_profile = StageProfile(device, profile, program);
     const auto code =
-        EmitPipelineShader(profile, runtime_info, program, binding, shader_hash, reference);
+        EmitPipelineShader(stage_profile, runtime_info, program, binding, shader_hash, reference);
     device.SaveShader(code);
     vk::ShaderModule module{BuildShader(device, code)};
 
@@ -544,6 +560,8 @@ PipelineCache::PipelineCache(Tegra::MaxwellDeviceMemoryManager& device_memory_,
             device.IsStorageTexelBufferArrayNonUniformIndexingSupported(),
 
         .warp_size_potentially_larger_than_guest = device.IsWarpSizePotentiallyBiggerThanGuest(),
+        .fast_software_hmma =
+            device.IsFloat16Supported() && float_control.shaderDenormPreserveFloat16 != VK_FALSE,
 
         .lower_left_origin_mode = false,
         .need_declared_frag_colors = false,
@@ -1380,7 +1398,8 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         if (emit_pools) {
             deferred_runtime_infos[stage_index] = runtime_info;
             if (VideoCommon::Nx2Perf::Verify()) {
-                reference_spirv[stage_index] = EmitSPIRV(profile, runtime_info, program, binding);
+                reference_spirv[stage_index] =
+                    EmitSPIRV(StageProfile(device, profile, program), runtime_info, program, binding);
             }
         } else {
             const auto begin = std::chrono::steady_clock::now();
@@ -1627,7 +1646,7 @@ ComputePipelineCacheEntry PipelineCache::CreateComputePipeline(
                     max_shared_memory / 1024);
         program.shared_memory_size = max_shared_memory;
     }
-    const std::vector<u32> code{EmitSPIRV(profile, program)};
+    const std::vector<u32> code{EmitSPIRV(StageProfile(device, profile, program), program)};
     device.SaveShader(code);
     vk::ShaderModule spv_module{BuildShader(device, code)};
 

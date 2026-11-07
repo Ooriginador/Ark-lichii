@@ -290,6 +290,39 @@ TEST_CASE("Software matrix helpers also emit for 64-lane host subgroups",
     }
 }
 
+TEST_CASE("Fast software HMMA emits unrolled inlineable SSA with hardware FP16 rounding",
+          "[video_core][tensor][ampere]") {
+    for (const bool wave64 : {false, true}) {
+        for (const u32 depth : {8U, 16U}) {
+            TensorProgram fixture{1, depth};
+            fixture.profile.fast_software_hmma = true;
+            fixture.profile.warp_size_potentially_larger_than_guest = wave64;
+            fixture.profile.max_subgroup_size = wave64 ? 64U : 32U;
+            const auto code = fixture.Emit();
+            REQUIRE(HasCapability(code, 9));              // Capability::Float16
+            REQUIRE_FALSE(HasCapability(code, 5357));     // No cooperative matrix extension
+            REQUIRE(Instructions(code, 246).empty());     // Zero OpLoopMerge (fully unrolled)
+            REQUIRE(Instructions(code, 247).empty());     // Zero OpSelectionMerge
+            REQUIRE(Instructions(code, 57).size() == 1);  // OpFunctionCall
+
+            const auto functions = Instructions(code, 54); // OpFunction: helper + main
+            REQUIRE(functions.size() == 2);
+            REQUIRE(functions[0][2] == 0); // FunctionControlMask::MaskNone (inlineable)
+
+            u32 fma_ops = 0;
+            for (const auto& ext : Instructions(code, 12)) {
+                if (ext.size() >= 4 && ext[3] == 50) {
+                    ++fma_ops;
+                }
+            }
+            REQUIRE(fma_ops == (depth == 8 ? 32U : 64U));
+            REQUIRE(Instructions(code, 345).size() == (depth == 8 ? 16U : 32U));
+            // K=8 emits 2 output OpFConvert(f16vec2); K=16 adds 4 midpoint OpFConvert ops (f16vec2 + f32vec2).
+            REQUIRE(Instructions(code, 115).size() == (depth == 8 ? 2U : 6U));
+        }
+    }
+}
+
 TEST_CASE("Captured Bananza matrix shaders lower without an environment override",
           "[video_core][tensor][ampere]") {
     TensorMode mode{nullptr};

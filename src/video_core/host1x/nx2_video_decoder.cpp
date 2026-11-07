@@ -96,6 +96,9 @@ struct Nx2VideoDecoder::Impl {
     std::optional<FFmpeg::HardwareContext> hardware;
     std::optional<FFmpeg::DecoderContext> context;
     SwsContext* scaler{};
+    int scaler_space{-1};
+    int scaler_src_range{-1};
+    int scaler_dst_range{-1};
     bool open{};
     H264PacketConverter h264_packets;
     /// Timestamps of submitted frames not yet output. Frames copied back from a host GPU decoder
@@ -272,6 +275,28 @@ void Nx2VideoDecoder::Render(const Nx2Picture& picture, Nx2PictureFormat format,
         }
         return;
     }
+    // The stream's matrix and range; untagged HD video is BT.709.
+    int space = SWS_CS_ITU601;
+    if (f->colorspace == AVCOL_SPC_BT709 ||
+        (f->colorspace == AVCOL_SPC_UNSPECIFIED && f->height >= 720)) {
+        space = SWS_CS_ITU709;
+    } else if (f->colorspace == AVCOL_SPC_BT2020_NCL || f->colorspace == AVCOL_SPC_BT2020_CL) {
+        space = SWS_CS_BT2020;
+    }
+    const int full_range_source = (f->color_range == AVCOL_RANGE_JPEG ||
+                                   f->format == AV_PIX_FMT_YUVJ420P ||
+                                   f->format == AV_PIX_FMT_YUVJ422P ||
+                                   f->format == AV_PIX_FMT_YUVJ444P ||
+                                   f->format == AV_PIX_FMT_YUVJ440P ||
+                                   f->format == AV_PIX_FMT_YUVJ411P)
+                                      ? 1
+                                      : 0;
+    const int full_range_dst = format != Nx2PictureFormat::Nv12 ? 1 : 0;
+    if (impl->scaler != nullptr &&
+        (impl->scaler_space != space || impl->scaler_src_range != full_range_source ||
+         impl->scaler_dst_range != full_range_dst)) {
+        sws_freeContext(std::exchange(impl->scaler, nullptr));
+    }
     impl->scaler = sws_getCachedContext(impl->scaler, f->width, f->height,
                                         static_cast<AVPixelFormat>(f->format),
                                         static_cast<int>(width), static_cast<int>(height), target,
@@ -282,23 +307,12 @@ void Nx2VideoDecoder::Render(const Nx2Picture& picture, Nx2PictureFormat format,
                   av_get_pix_fmt_name(target));
         return;
     }
-    // The stream's matrix and range; untagged HD video is BT.709.
-    int space = SWS_CS_ITU601;
-    if (f->colorspace == AVCOL_SPC_BT709 ||
-        (f->colorspace == AVCOL_SPC_UNSPECIFIED && f->height >= 720)) {
-        space = SWS_CS_ITU709;
-    } else if (f->colorspace == AVCOL_SPC_BT2020_NCL || f->colorspace == AVCOL_SPC_BT2020_CL) {
-        space = SWS_CS_BT2020;
-    }
-    const bool full_range_source = f->color_range == AVCOL_RANGE_JPEG ||
-                                  f->format == AV_PIX_FMT_YUVJ420P ||
-                                  f->format == AV_PIX_FMT_YUVJ422P ||
-                                  f->format == AV_PIX_FMT_YUVJ444P ||
-                                  f->format == AV_PIX_FMT_YUVJ440P ||
-                                  f->format == AV_PIX_FMT_YUVJ411P;
+    impl->scaler_space = space;
+    impl->scaler_src_range = full_range_source;
+    impl->scaler_dst_range = full_range_dst;
     const int* coefficients = sws_getCoefficients(space);
     sws_setColorspaceDetails(impl->scaler, coefficients, full_range_source, coefficients,
-                             format != Nx2PictureFormat::Nv12, 0, 1 << 16, 1 << 16);
+                             full_range_dst, 0, 1 << 16, 1 << 16);
     std::array<u8*, 4> planes{out.data(), nullptr, nullptr, nullptr};
     std::array<int, 4> strides{static_cast<int>(pitch), 0, 0, 0};
     if (format == Nx2PictureFormat::Nv12) {

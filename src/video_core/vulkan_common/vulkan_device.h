@@ -530,7 +530,9 @@ FN_MAX_LIMIT_LIST
 
     /// Returns true if the device can be forced to use the guest warp size.
     bool IsGuestWarpSizeSupported(VkShaderStageFlagBits stage) const {
-        return properties.subgroup_size_control.requiredSubgroupSizeStages & stage;
+        return (properties.subgroup_size_control.requiredSubgroupSizeStages & stage) != 0 &&
+               properties.subgroup_size_control.minSubgroupSize <= GuestWarpSize &&
+               properties.subgroup_size_control.maxSubgroupSize >= GuestWarpSize;
     }
 
     /// Returns true if the device supports the provided subgroup feature.
