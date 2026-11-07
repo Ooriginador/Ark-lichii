@@ -135,6 +135,10 @@ void LoadOverrides(std::uint64_t program_id, const VideoCore::RendererBase& rend
             Settings::values.barrier_feedback_loops = true;
             Settings::values.enable_buffer_history = false;
             Settings::values.async_presentation = false;
+            if (Settings::values.max_anisotropy.GetValue() == Settings::AnisotropyMode::Automatic ||
+                Settings::values.max_anisotropy.GetValue() == Settings::AnisotropyMode::Default) {
+                Settings::values.max_anisotropy = Settings::AnisotropyMode::X16;
+            }
             if (Settings::values.scaling_filter.GetValue() == Settings::ScalingFilter::ScaleForce) {
                 Settings::values.scaling_filter = Settings::ScalingFilter::Bilinear;
             }

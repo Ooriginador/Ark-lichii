@@ -383,6 +383,11 @@ NupContainer::NupContainer(VirtualFile file_, std::size_t memory_cache_cap,
             }
         } catch (...) {
         }
+    } else if (file != nullptr && memory_cache_cap == NupDecompressCache::DefaultCap &&
+               file->GetSize() >= 16ULL * 1024 * 1024 * 1024) {
+        // Auto-scale decompression cache to 4 GiB for massive open-world titles (>16 GiB)
+        // when sufficient host memory is available, eliminating spill stalls to /tmp.
+        memory_cache_cap = 4096ULL * 1024 * 1024;
     }
     cache->cap = memory_cache_cap;
     cache->spill_dir = spill_dir_.empty()

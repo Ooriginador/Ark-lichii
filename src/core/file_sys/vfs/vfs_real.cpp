@@ -330,7 +330,7 @@ RealVfsFile::RealVfsFile(RealVfsFilesystem& base_, std::unique_ptr<FileReference
                 if (ptr != MAP_FAILED) {
                     mmap_ptr = ptr;
                     madvise(mmap_ptr, mmap_size, MADV_NORMAL);
-                    madvise(mmap_ptr, std::min(mmap_size, std::size_t{32 * 1024 * 1024}), MADV_WILLNEED);
+                    madvise(mmap_ptr, std::min(mmap_size, std::size_t{64 * 1024 * 1024}), MADV_WILLNEED);
 #ifdef MADV_HUGEPAGE
                     madvise(mmap_ptr, mmap_size, MADV_HUGEPAGE);
 #endif
